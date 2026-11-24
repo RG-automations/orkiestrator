@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Linux/macOS equivalent of start.bat. Keys live in local.env (see local.env.example), never in this file.
+# Run this inside a virtualenv (python3 -m venv .venv && source .venv/bin/activate) on systems where
+# the system Python refuses `pip install` outside one (PEP 668, "externally-managed-environment").
 set -euo pipefail
 cd "$(dirname "$0")"
 

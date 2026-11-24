@@ -51,8 +51,9 @@ Needs Python 3.10+. Verified on a clean clone:
 ```bash
 git clone https://github.com/RG-automations/orkiestrator.git
 cd orkiestrator
-python3 -m pip install -e .
-ORKI_PROVIDER=demo python3 -m orkiestrator serve
+python3 -m venv .venv && source .venv/bin/activate   # or use pipx/your own flow
+pip install -e .
+ORKI_PROVIDER=demo python -m orkiestrator serve
 ```
 
 Open the URL it prints (includes a one-time token). Linux/macOS: `./start.sh`. Windows: `start.bat`.
