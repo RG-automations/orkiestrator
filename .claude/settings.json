@@ -5,8 +5,10 @@
       "Bash(python -m orkiestrator reject*)",
       "Bash(python3 -m orkiestrator approve*)",
       "Bash(python3 -m orkiestrator reject*)",
-      "Edit(data/queue.db)",
-      "Write(data/queue.db)"
+      "Bash(sqlite3 *)",
+      "Edit(data/**)",
+      "Read(local.env)",
+      "Edit(local.env)"
     ]
   }
 }
