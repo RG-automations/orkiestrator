@@ -1,5 +1,7 @@
 # orkiestrator
 
+[![CI](https://github.com/RG-automations/orkiestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RG-automations/orkiestrator/actions/workflows/ci.yml)
+
 > Human-in-the-loop AI social media team for one person.
 > AI researches, drafts posts and replies; **nothing goes public until a human clicks Approve.**
 
