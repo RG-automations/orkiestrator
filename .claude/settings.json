@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(python -m orkiestrator approve*)",
+      "Bash(python -m orkiestrator reject*)",
+      "Bash(python3 -m orkiestrator approve*)",
+      "Bash(python3 -m orkiestrator reject*)",
+      "Edit(data/queue.db)",
+      "Write(data/queue.db)"
+    ]
+  }
+}
