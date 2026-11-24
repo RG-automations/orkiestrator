@@ -25,7 +25,7 @@ def _discord(text, http=None):
     url = f"https://discord.com/api/v10/channels/{os.environ['CHANNEL_ORKIESTRATOR']}/messages"
     data = json.dumps({"content": text[:1900]}).encode("utf-8")
     headers = {"Authorization": f"Bot {os.environ['DISCORD_BOT_TOKEN']}", "Content-Type": "application/json",
-               "User-Agent": "DiscordBot (https://github.com/RG-automations/orkiestrator, 0.1)"}
+               "User-Agent": "orkiestrator (https://github.com/RG-automations/orkiestrator, 0.1)"}
     (http or (lambda u, d: urllib.request.urlopen(urllib.request.Request(u, data=d, headers=headers), timeout=20).read()))(url, data)
 
 

@@ -10,7 +10,7 @@ coffee roastery). Publishing is dry-run for every platform except an opt-in Face
 only been tested against a mock HTTP call, never a real Page.
 
 - **Zero runtime dependencies.** The package itself is Python standard library only.
-- **139 tests**, `python -m unittest discover -s tests`, including negative tests for the approval gate.
+- **148 tests**, `python -m unittest discover -s tests`, including negative tests for the approval gate.
 - **Runs with no API key and no network**: `ORKI_PROVIDER=demo` (see [Try it without a key](#try-it-without-a-key)).
 - Built with [Claude Code](https://claude.com/claude-code): role subagents in [`.claude/agents/`](.claude/agents/)
   are *denied* the approve/reject commands and any write to the queue database in [`.claude/settings.json`](.claude/settings.json).
@@ -37,14 +37,18 @@ flowchart LR
     G -->|approve / reject, human: actor only| H{{"Owner (panel or CLI)"}}
     H -->|approve| A[approved]
     A -->|schedule| S[scheduled]
-    S -->|publish: re-verify human approval + content hash| P[(Adapter: dry-run or Facebook)]
+    S -->|"claim_for_publish: atomic, at most once"| X["publishing (frozen, un-editable)"]
+    X -->|adapter call| P[(Adapter: dry-run or Facebook)]
 ```
 
 Everything left of the gate is written by `agent:*` actors and can only reach `draft` or
 `pending_approval`. Everything right of it requires an actor string starting with `human:`, which only
-the owner's CLI session or an authenticated panel request can produce. `schedule` and `publish`
-re-check that approval — including a content hash — immediately before any platform call, not just the
-status column (see [`SECURITY.md`](SECURITY.md) for exactly what that does and doesn't guarantee).
+the owner's CLI session or an authenticated panel request can produce. `schedule` re-checks that approval
+— including a content hash — before changing status; `publishing` is reached only through a single atomic
+database update that at most one caller can win, so the platform adapter is called at most once per post
+from this code's side (see [`SECURITY.md`](SECURITY.md), in particular "Four distinctions this document
+does not blur", for exactly what that does and doesn't guarantee — it is not the same as exactly-once
+delivery on the external platform, and it is not a sandbox against untrusted code).
 
 ## Quick start
 
@@ -91,7 +95,7 @@ src/orkiestrator/
   brain.py         the morning loop (research, content, replies, brief, in priority order)
   interrupts.py    alert rules (trend spike, competitor spike, buying intent, negative comment, ...)
   scheduler.py     next publishing slot per platform, from knowledge/platforms/*.md
-  publisher.py     background loop; only ever calls adapters for gate-approved, hash-verified posts
+  publisher.py     background loop; atomic claim makes the adapter call run at most once per post
   adapters/        Publisher interface; DryRunPublisher + FacebookPublisher
 knowledge/ inputs/   brand voice, offer, platform rules, audience data (demo content here)
 tests/               python -m unittest discover -s tests
@@ -101,7 +105,7 @@ tests/               python -m unittest discover -s tests
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests   # 139 tests, ~20s
+python3 -m unittest discover -s tests   # 148 tests, ~20s
 ruff check .                            # lint (config in pyproject.toml)
 ```
 

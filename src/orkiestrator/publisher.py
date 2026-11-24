@@ -21,7 +21,10 @@ def due_posts(conn, as_of=None):
 
 
 def run_due(conn, actor="agent:publisher", as_of=None, outbox=None):
-    """Publishes every due, human-approved post exactly once, even if two processes call this at once.
+    """Calls the platform adapter at most once per due, human-approved post, even if two processes call
+    this at once. That is a claim about this code, not about the external platform: see SECURITY.md's
+    "No duplicate internal call, not exactly-once external delivery" for why a timed-out HTTP call can
+    still result in a real duplicate on the platform side.
 
     due_posts() is a plain read and can return the same row to two concurrent callers (two publisher
     loops, or a loop racing a manual `publish-due`). claim_for_publish() is the only thing that actually

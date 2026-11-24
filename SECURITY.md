@@ -3,6 +3,33 @@
 This is a portfolio project, not a maintained product. There is no bug bounty and no SLA. If you find a
 real issue, open a GitHub issue or a private security advisory on this repo.
 
+## Four distinctions this document does not blur
+
+It is easy to read a few green checkmarks and a security doc and assume more coverage than exists. These
+four pairs sound similar and are not the same thing. Everywhere below, read the narrower claim on the left.
+
+- **Human-in-the-loop, not sandboxing.** The approval gate stops an AI-written post from reaching a
+  platform without a click. It does not sandbox, contain, or limit what AI-generated *code* could do if
+  the pipeline ever executed model output as code (it doesn't today — outputs are parsed as JSON text
+  fields, never `eval`'d or shelled out to) or if an agent obtained arbitrary code execution in this
+  environment. See "What actually enforces that an agent can't call approve/reject" below: that boundary
+  is a permission-tool policy, not a code-level sandbox.
+- **Escaping, not prompt-injection resistance.** `tests/test_injection.py` proves attacker-controlled text
+  (script tags, SQL metacharacters, template-injection strings) can't break out of SQL, SVG or HTML — it
+  stays inert data. It says nothing about whether a cleverly worded competitor comment or input file could
+  talk the *language model itself* into drafting a bad, off-brand, or manipulative post. That risk is
+  unchanged by any of this; it's why a human still reads every draft before approving it.
+- **No duplicate internal call, not exactly-once external delivery.** `claim_for_publish()` guarantees the
+  platform adapter is called **at most once** by this codebase for a given approved post (see "Publishing"
+  below). It cannot guarantee the *external platform* only ever receives one copy: if the HTTP call to
+  Facebook times out after the post was actually created server-side, this code sees a failure, releases
+  the claim, and the next run retries — correctly, by this code's rules, and incorrectly, as a real
+  duplicate on Facebook, because the Graph API's `/feed` endpoint takes no idempotency key. True
+  exactly-once delivery needs platform-side idempotency support this project doesn't add.
+- **Prototype, not production.** Single SQLite file, no deployment hardening, no monitoring, one
+  integration tested against a mock. Extracted from a private project for portfolio purposes; see the
+  README's Status line and "Known limitations" below before relying on this for anything real.
+
 ## What the gate actually guarantees
 
 The state machine in [`gate.py`](src/orkiestrator/gate.py) is the only code path that changes a post's
