@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from orkiestrator import adapters, attribution, brain, carousel, gate, hooks, interrupts, leads, notify, pipeline, web  # noqa: E402
+from orkiestrator import adapters, attribution, brain, carousel, gate, hooks, leads, notify, pipeline, web  # noqa: E402
 from orkiestrator.db import connect  # noqa: E402
 
 TOKEN = "t0ken"

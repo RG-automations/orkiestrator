@@ -5,8 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "orkiestrator"
 version = "0.1.0"
-description = "AI social media team for one person. Nothing publishes without a human yes."
+description = "Human-in-the-loop AI social media team for one person. Nothing publishes without a human yes."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Rafał Glinka" }]
 requires-python = ">=3.10"
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 140
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]  # long HTML/f-string lines in web.py; no formatter is enforced

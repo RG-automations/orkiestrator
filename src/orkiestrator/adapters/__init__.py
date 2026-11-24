@@ -1,6 +1,6 @@
 import os
 
-from .base import Publisher
+from .base import Publisher  # noqa: F401  re-exported for new adapters
 from .dryrun import DryRunPublisher
 from .facebook import FacebookPublisher
 

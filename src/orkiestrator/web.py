@@ -319,7 +319,8 @@ def make_server(port=8765, llm=None, outbox=None, token=None, db_path=None, host
         # ---- pages
         def page_home(self, msg, err):
             conn = self.conn()
-            n = lambda s: conn.execute("SELECT COUNT(*) FROM posts WHERE status=?", (s,)).fetchone()[0]
+            def n(s):
+                return conn.execute("SELECT COUNT(*) FROM posts WHERE status=?", (s,)).fetchone()[0]
             pending, published = n("pending_approval"), n("published")
             brand_ok = not pipeline.is_placeholder(pipeline.KNOW / "offer" / "offer.md")
             has_inputs = any((ROOT / "inputs").glob("*.csv"))
@@ -400,10 +401,6 @@ def make_server(port=8765, llm=None, outbox=None, token=None, db_path=None, host
                 if r["warnings"]:
                     head += f"<br><span class=tag style='background:#fff4ce'>Uwaga: {esc(r['warnings'])}</span>"
                 media = ""
-                try:
-                    pl = json.loads(r["payload"] or "{}")
-                except ValueError:
-                    pl = {}
                 for svg in sorted(carousel.assets_dir(r["id"]).glob("slide-*.svg")):
                     media += f"<img src=/assets/{r['id']}/{svg.name} width=150 style='margin:4px;border:1px solid #ddd'> "
                 if (carousel.assets_dir(r["id"]) / "voiceover.mp3").exists():

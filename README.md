@@ -1,69 +1,113 @@
-# Orkiestrator: zespół social media dla jednej osoby
+# orkiestrator
 
-AI robi research, pisze treści, przygotowuje odpowiedzi, pilnuje alertów i raportuje. **Nic nie wychodzi publicznie, dopóki sam nie klikniesz „Zatwierdź".**
+> Human-in-the-loop AI social media team for one person.
+> AI researches, drafts posts and replies; **nothing goes public until a human clicks Approve.**
 
-## Jak tego używać (5 minut)
+Status: working prototype, extracted from a private project with a fictional demo brand ("Ziarnko", a
+coffee roastery). Publishing is dry-run for every platform except an opt-in Facebook adapter that has
+only been tested against a mock HTTP call, never a real Page.
 
-1. **Jednorazowo:** zainstaluj Pythona 3.10+ i ustaw klucz AI w zmiennej środowiskowej: `GEMINI_API_KEY` (klucz z aistudio.google.com/api-keys) albo `ANTHROPIC_API_KEY` (Claude). Najwygodniej: skopiuj `local.env.example` jako `local.env` i wpisz klucz, `start.bat` wczyta go sam. Jeśli są oba, wygrywa Gemini; wymusisz wybór przez `ORKI_PROVIDER=claude`.
-2. **Uruchom:** dwuklik na `start.bat`. W terminalu pojawi się adres z tokenem i otworzy się przeglądarka. Token widzisz tylko Ty, nie jest nigdzie zapisany.
-3. **Strona Start prowadzi krok po kroku:**
-   1. *Dane marki*: oferta, cennik, głos, cele.
-   2. *Dane wejściowe*: trendy, konkurencja, komentarze (CSV).
-   3. *Research*, 4. *Tydzień treści*, 5. *Odpowiedzi*: jeden przycisk każdy.
-   6. *Zatwierdź*: w zakładce „Do zatwierdzenia" czytasz, poprawiasz, klikasz.
-   
-   Albo jednym przyciskiem **Pętla poranna** (alerty, research, treści, odpowiedzi, raport). Uruchamia się też sama codziennie o godzinie z `inputs/goals.md` (`morning: 08:00`), dopóki panel działa.
-4. **Zatwierdzanie ma dwa przyciski:** *Zatwierdź* planuje post na najbliższą dobrą porę (godziny w `knowledge/platforms/<platforma>-rules.md`, linia `slots:`), *Zatwierdź i opublikuj teraz* publikuje od razu. Odpowiedzi na komentarze i DM-y idą od razu.
+- **Zero runtime dependencies.** The package itself is Python standard library only.
+- **139 tests**, `python -m unittest discover -s tests`, including negative tests for the approval gate.
+- **Runs with no API key and no network**: `ORKI_PROVIDER=demo` (see [Try it without a key](#try-it-without-a-key)).
+- Built with [Claude Code](https://claude.com/claude-code): role subagents in [`.claude/agents/`](.claude/agents/)
+  are *denied* the approve/reject commands and any write to the queue database in [`.claude/settings.json`](.claude/settings.json).
 
-   **Kolejka i archiwum.** Zakładka „Do zatwierdzenia” pokazuje tylko to, co czeka na Twoją decyzję. Zaplanowane, opublikowane, odrzucone i szkice są w osobnych zakładkach, a „Archiwizuj” chowa gotowe pozycje do Archiwum (z możliwością przywrócenia, nic nie jest kasowane). Odrzucając post, wybierasz powód („po angielsku”, „zbyt ogólne”, „zły ton”, „nie moja teza”), a ostatnie 5 powodów trafia do następnego zapytania do AI. Leady i komentarze chowasz przyciskiem „Gotowe, ukryj”.
+## Why this exists
 
-   **Limit szkiców.** „Napisz tydzień” tworzy najwyżej 3 szkice naraz i nie ruszy, gdy 3 lub więcej już czeka (odpowiedzi na komentarze się nie liczą). Powtórne kliknięcie podczas pracy jest odrzucane, a ten sam hak nie wejdzie do kolejki drugi raz. Przy błędzie limitu API (429) aplikacja ponawia zapytanie po 8, 20 i 45 sekundach.
+A one-person brand doesn't need an agency, but it does need research, drafts, and replies written
+every day — work that's tedious to do from scratch and risky to fully automate. This project tries a
+narrow answer: let AI do the writing, and make the one-way door (publishing) impossible to open without
+a human.
 
-   **Sprawdzanie przed zapisem szkicu.** Tekst wyraźnie po angielsku jest raz przepisywany po polsku, a jeśli nadal nie jest, szkic w ogóle nie trafia do kolejki. Link, procent albo kwota, których nie ma w Twoich danych, blokują szkic. Fakt z nieweryfikowalnym źródłem zostaje, ale z żółtym ostrzeżeniem.
+## Trust boundary
 
-   **Kopie zapasowe.** Przed zmianą schematu bazy (np. po aktualizacji) powstaje kopia w `data/backups/`. Dane oznaczone jako testowe (`is_test`) usuwa przycisk „Usuń dane testowe”.
+```mermaid
+flowchart LR
+    subgraph agent["AI pipeline (untrusted output)"]
+        R[Research] --> C[Drafts] --> Y[Replies]
+    end
+    C -->|add_draft, submit| G
+    Y -->|add_draft, submit| G
+    subgraph gate["gate.py — the only writer of post status"]
+        G[(posts: draft → pending_approval)]
+    end
+    G -->|approve / reject, human: actor only| H{{"Owner (panel or CLI)"}}
+    H -->|approve| A[approved]
+    A -->|schedule| S[scheduled]
+    S -->|publish: re-verify human approval + content hash| P[(Adapter: dry-run or Facebook)]
+```
 
-## Co dostajesz
+Everything left of the gate is written by `agent:*` actors and can only reach `draft` or
+`pending_approval`. Everything right of it requires an actor string starting with `human:`, which only
+the owner's CLI session or an authenticated panel request can produce. `schedule` and `publish`
+re-check that approval — including a content hash — immediately before any platform call, not just the
+status column (see [`SECURITY.md`](SECURITY.md) for exactly what that does and doesn't guarantee).
 
-| Moduł | Co robi |
+## Quick start
+
+Needs Python 3.10+. Verified on a clean clone:
+
+```bash
+git clone https://github.com/RG-automations/orkiestrator.git
+cd orkiestrator
+python3 -m pip install -e .
+ORKI_PROVIDER=demo python3 -m orkiestrator serve
+```
+
+Open the URL it prints (includes a one-time token). Linux/macOS: `./start.sh`. Windows: `start.bat`.
+
+### Try it without a key
+
+`ORKI_PROVIDER=demo` swaps the real LLM calls for fixed, canned answers shaped like the real prompts
+(see [`demo.py`](src/orkiestrator/demo.py)) — no network call, no cost, no account. Click through
+**Research → Tydzień treści → Odpowiedzi** on the Start page, then approve or reject what shows up in
+**Kolejka**. The demo brand ("Ziarnko") and all its data (`knowledge/`, `inputs/`) are fictional.
+
+To use a real model instead, set `GEMINI_API_KEY` (free tier at [aistudio.google.com](https://aistudio.google.com/api-keys))
+or `ANTHROPIC_API_KEY` in `local.env` (copy from `local.env.example`).
+
+## What's real and what's dry-run
+
+| Platform | Status |
 |---|---|
-| Research | Brief tygodnia z Twoich danych, ranking konkurencji względem własnej średniej konta, pytania odbiorców, rozbicie haków (pierwsze 3 s i dlaczego działa) do `knowledge/hooks/hook-breakdowns.md` |
-| Treści | Do 7 materiałów na tydzień: 3 warianty haka z oceną, podpis, scenariusz z czasem i tekstem na ekranie, karuzele jako pliki SVG 1080x1350, tekst miniatury, kontrola marki (stały filtr stylu + ostrzeżenia AI) |
-| Posting i community | Harmonogram po godzinach per platforma, odpowiedzi w głosie marki, wykrywanie pytań o cenę (lead), negatywnych komentarzy i propozycji współpracy |
-| Alerty | Skok trendu, post konkurencji, pytanie o cenę, negatywny komentarz, współpraca, skok kliknięć, flop w pierwszej godzinie (progi w `knowledge/reporting/kpi-model.md`) |
-| Lejek | Własne linki `/r/<id>` liczące kliknięcia, leady ze statusami, „to klient" z kwotą, raport post → obserwujący → kliknięcie → klient, scoring haków (powtórz / wycofaj) i porównanie A/B |
-| Powiadomienia | Telegram lub e-mail o tym, że coś czeka. Wiadomość ma tylko link do panelu, zatwierdzać można wyłącznie w panelu |
+| Facebook (Page) | Real Graph API adapter, opt-in. Needs `FB_PAGE_ID` + `FB_PAGE_TOKEN` and the owner typing `OPUBLIKUJ NAPRAWDE` in the panel. **Tested against a mock HTTP call only** — not verified against the real API. |
+| Instagram, YouTube, LinkedIn, TikTok | Dry-run. An approved post is written to `data/outbox/<platform>-<id>.json`. No real adapter exists. |
 
-## Zmienne środowiskowe (wszystkie opcjonalne poza pierwszą)
-`GEMINI_API_KEY` lub `ANTHROPIC_API_KEY` (przyciski AI), `FB_PAGE_ID` + `FB_PAGE_TOKEN` (prawdziwa publikacja na stronie Facebook), `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` albo `SMTP_HOST` + `SMTP_TO` (+ `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`), `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID` (lektor), `ORKI_MODEL` (zmiana modelu; domyślnie `gemini-flash-latest` dla Gemini, `claude-sonnet-5-5` dla Claude), `ORKI_PROVIDER` (`gemini` albo `claude`).
-W `inputs/goals.md` możesz dodać linie `morning: 08:00` i `offer_url: https://twoja-oferta` (dokąd przekierowuje `/r/<id>`).
+## Project structure
 
-## Publikacja: co jest prawdziwe
-- **Facebook (strona):** prawdziwy adapter. Włączasz go świadomie: ustaw `FB_PAGE_ID` i `FB_PAGE_TOKEN`, uruchom panel, na Start wpisz `OPUBLIKUJ NAPRAWDE`. Tryb live resetuje się przy każdym restarcie.
-- **Instagram, YouTube, LinkedIn, TikTok:** na razie tryb próbny. Zatwierdzony post zapisuje się w `data/outbox/`. Adapter to jeden plik (patrz niżej).
-- Adapter Facebooka jest przetestowany na atrapie serwera, **nie** na prawdziwym API. Pierwszą publikację zrób na testowej stronie.
-- Kliknięcia `/r/<id>` liczą się naprawdę tylko wtedy, gdy panel jest osiągalny z internetu (tunel lub hosting). Lokalnie działa do testów.
-
-## Czego nie ma (świadomie)
-Edycja wideo i klipy, b-roll, ads manager, miniatury jako obrazy, Notion/Airtable jako baza (jest SQLite), liczba obserwujących z API platform (wpisujesz ją w CSV wyników), publikacja na Instagram/YouTube/LinkedIn/TikTok. Jakość tekstów od AI oceń sam przed zatwierdzeniem: ostrzeżenia kontroli marki są tylko podpowiedzią.
-
-## Dla inżynierów
 ```
-start.bat / python -m orkiestrator serve   panel (127.0.0.1, token w terminalu, cookie HttpOnly, SameSite=Strict)
-src/orkiestrator/gate.py        jedyna maszyna stanów: draft > pending_approval > approved > scheduled > published | rejected
-src/orkiestrator/web.py         panel; approve/reject tylko z sesją właściciela; jedyna publiczna ścieżka to GET /r/<link_id>
-src/orkiestrator/brain.py       pętla poranna w kolejności priorytetów, etapy izolowane, codzienny wyzwalacz
-src/orkiestrator/interrupts.py  reguły alertów (czyste funkcje, progi z kpi-model.md)
-src/orkiestrator/scheduler.py   sloty z linii `slots:` w knowledge/platforms/*.md
-src/orkiestrator/publisher.py   publikuje tylko to, co bramka oznaczyła jako zatwierdzone przez człowieka; pętla w tle co 60 s
-src/orkiestrator/pipeline.py    research / content / replies (llm wstrzykiwany, testowalny bez API)
-src/orkiestrator/attribution.py, hooks.py, leads.py, lint.py, carousel.py, voiceover.py, notify.py, ai.py (Gemini i Claude)
-src/orkiestrator/adapters/      Publisher; DryRunPublisher + FacebookPublisher
-knowledge/ inputs/ data/        wiedza marki, dane wejściowe, stan (kolejka, briefy, raporty, outbox, assets)
-.claude/ CLAUDE.md              tryb pracy w Claude Code (subagenci); agenci mają zakaz approve/reject
-tests/                          python -m unittest discover -s tests
+src/orkiestrator/
+  gate.py          the state machine: draft → pending_approval → approved → scheduled → published | rejected
+  web.py           owner panel (127.0.0.1, token auth, CSRF origin check)
+  cli.py           python -m orkiestrator add|submit|approve|reject|list|schedule|publish-due|brief
+  pipeline.py      research / content / replies — takes any llm(system, prompt) -> str
+  ai.py / demo.py  Gemini, Claude, or the offline demo provider
+  brain.py         the morning loop (research, content, replies, brief, in priority order)
+  interrupts.py    alert rules (trend spike, competitor spike, buying intent, negative comment, ...)
+  scheduler.py     next publishing slot per platform, from knowledge/platforms/*.md
+  publisher.py     background loop; only ever calls adapters for gate-approved, hash-verified posts
+  adapters/        Publisher interface; DryRunPublisher + FacebookPublisher
+knowledge/ inputs/   brand voice, offer, platform rules, audience data (demo content here)
+tests/               python -m unittest discover -s tests
+.claude/ CLAUDE.md    Claude Code subagent setup; agents are denied approve/reject and queue.db writes
 ```
-**Gwarancje:** `approve` i `reject` wymagają aktora `human:`. `schedule` i `publish` ponownie sprawdzają zapisane zatwierdzenie, więc podrobiona kolumna `status` nie wystarczy. Edycja posta unieważnia zatwierdzenie. Każdy `submit` przechodzi filtr stylu. Prawdziwy adapter wymaga kluczy oraz jawnego potwierdzenia w panelu. Każde przejście jest w tabeli `events`.
 
-Nowy adapter: zaimplementuj `Publisher.publish(post)` i zwróć go z `get_publisher` w `adapters/__init__.py`.
-CLI nadal działa (`python -m orkiestrator list|add|submit|brief|lead ...`); `approve` w CLI wymaga interaktywnego terminala.
+## Development
+
+```bash
+python3 -m unittest discover -s tests   # 139 tests, ~20s
+ruff check .                            # lint (config in pyproject.toml)
+```
+
+`tests/test_hitl.py` is the one worth reading first: it tries to approve as a non-human actor, forge a
+`scheduled` status without approval, tamper with content after approval, replay a stale approval hash,
+and bypass the panel's session/origin checks — and asserts every one of those is refused.
+
+## License
+
+[MIT](LICENSE).
+
+## Author
+
+Rafał Glinka — [github.com/RG-automations](https://github.com/RG-automations)

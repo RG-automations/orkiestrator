@@ -22,7 +22,7 @@ def render(conn, day=None):
 
     leads = conn.execute("SELECT platform, handle, message FROM leads WHERE status = 'new' ORDER BY id").fetchall()
     lines += ["", f"## New leads ({len(leads)})"]
-    lines += [f"- {l['handle']} on {l['platform']}: {l['message']}" for l in leads] or ["- None."]
+    lines += [f"- {ld['handle']} on {ld['platform']}: {ld['message']}" for ld in leads] or ["- None."]
 
     funnel = attribution.funnel(conn)
     lines += ["", "## Money, not likes (post -> follower -> click -> customer)"]

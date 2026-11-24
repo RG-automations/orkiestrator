@@ -204,7 +204,7 @@ class PanelTests(unittest.TestCase):
 
     def test_token_in_query_string_does_not_approve(self):
         self.assertEqual(self.req("POST", f"/approve/{self.pid}?token={self.TOKEN}"), 401)
-        self.assertEqual(self.req("GET", f"/?token=wrong"), 401)
+        self.assertEqual(self.req("GET", "/?token=wrong"), 401)
         self.assertEqual(self.status(), "pending_approval")
 
     def test_cross_origin_post_is_refused_even_with_the_cookie(self):
