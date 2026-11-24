@@ -1,6 +1,6 @@
 """LLM clients (stdlib only). The pipeline takes any callable llm(system, prompt) -> str.
 
-Provider: ORKI_PROVIDER=gemini|claude, otherwise Gemini when GEMINI_API_KEY (or GOOGLE_API_KEY) is set,
+Provider: ORKI_PROVIDER=gemini|claude|demo (demo: offline canned answers, see demo.py), otherwise Gemini when GEMINI_API_KEY (or GOOGLE_API_KEY) is set,
 else Claude when ANTHROPIC_API_KEY is set. ORKI_MODEL overrides the default model of either provider.
 """
 import json
@@ -42,9 +42,9 @@ def gemini_key():
 
 
 def provider():
-    """Returns 'gemini', 'claude' or None when no key is configured."""
+    """Returns 'gemini', 'claude', 'demo' or None when no key is configured."""
     forced = os.environ.get("ORKI_PROVIDER", "").lower()
-    if forced in ("gemini", "claude"):
+    if forced in ("gemini", "claude", "demo"):
         return forced
     if gemini_key():
         return "gemini"
@@ -89,4 +89,8 @@ def default_llm(system, prompt):
         return gemini_llm(system, prompt)
     if which == "claude":
         return claude_llm(system, prompt)
-    raise MissingKey("Brak klucza AI. Ustaw GEMINI_API_KEY (aistudio.google.com/api-keys) albo ANTHROPIC_API_KEY.")
+    if which == "demo":
+        from . import demo
+        return demo.llm(system, prompt)
+    raise MissingKey("Brak klucza AI. Ustaw GEMINI_API_KEY (aistudio.google.com/api-keys) albo ANTHROPIC_API_KEY, "
+                     "albo ORKI_PROVIDER=demo (tryb demo bez sieci).")
