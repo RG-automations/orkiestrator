@@ -113,6 +113,8 @@ MIGRATIONS = (
     ("inbound", "is_test", "INTEGER NOT NULL DEFAULT 0"),
     ("leads", "archived_at", "TEXT"),
     ("leads", "is_test", "INTEGER NOT NULL DEFAULT 0"),
+    # approved_hash: what exactly the human approved; posts approved before this column existed must be re-approved.
+    ("posts", "approved_hash", "TEXT"),
 )
 
 

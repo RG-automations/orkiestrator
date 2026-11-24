@@ -23,6 +23,7 @@ def due_posts(conn, as_of=None):
 def run_due(conn, actor="agent:publisher", as_of=None, outbox=None):
     published = []
     for post in due_posts(conn, as_of):
+        gate.verify_approval(post)  # before the platform call, not after it
         ref = get_publisher(post["platform"], outbox).publish(post)
         gate.transition(conn, post["id"], "publish", actor, note=ref)
         published.append((post["id"], ref))

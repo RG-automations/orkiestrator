@@ -4,6 +4,8 @@ Actors are strings: "agent:<name>" for the AI team, "human:<name>" for the owner
 Agents may create drafts and submit them for review. Only a human can approve or
 reject, and only an approved post can be scheduled or published.
 """
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from . import lint
@@ -32,6 +34,23 @@ def is_human(actor):
     return actor.startswith("human:") and len(actor) > len("human:")
 
 
+CONTENT_FIELDS = ("platform", "kind", "title", "hook", "body", "payload", "link_id")
+
+
+def content_hash(row):
+    """Fingerprint of everything that goes out. Integrity check, not a signature: whoever can write the DB can recompute it."""
+    data = json.dumps([row[k] for k in CONTENT_FIELDS], ensure_ascii=False)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def verify_approval(row):
+    """Raises unless a human approved exactly this content. Called before any platform call and again on the transition."""
+    if not row["approved_by"] or not is_human(row["approved_by"]) or not row["approved_at"]:
+        raise GateError(f"post {row['id']} has no human approval on record")
+    if row["approved_hash"] != content_hash(row):
+        raise GateError(f"post {row['id']} changed after approval (or was approved before content hashing): approve it again")
+
+
 def add_draft(conn, actor, platform, kind, body, title="", hook="", brief_ref="", link_id="", payload="", warnings="", is_test=False):
     """Drafts are the only thing that can be inserted; there is no way to create any other status."""
     cur = conn.execute(
@@ -57,9 +76,7 @@ def transition(conn, post_id, action, actor, note="", scheduled_at=None):
     if row["status"] not in allowed_from:
         raise GateError(f"cannot {action} post {post_id} in status {row['status']!r}")
     if action in ("schedule", "publish"):
-        # Defense in depth: re-verify the human sign-off, not just the status column.
-        if not row["approved_by"] or not is_human(row["approved_by"]) or not row["approved_at"]:
-            raise GateError(f"post {post_id} has no human approval on record")
+        verify_approval(row)
     if action == "submit":
         problems = lint.check(f"{row['hook']}\n{row['body']}")
         if problems:
@@ -71,9 +88,9 @@ def transition(conn, post_id, action, actor, note="", scheduled_at=None):
     if action == "submit":
         fields["archived_at"] = None  # a rejected, archived post that is sent back for review is a working post again
     if action == "approve":
-        fields.update(approved_by=actor, approved_at=now())
+        fields.update(approved_by=actor, approved_at=now(), approved_hash=content_hash(row))
     if action == "reject":
-        fields.update(approved_by=None, approved_at=None, note=note)
+        fields.update(approved_by=None, approved_at=None, approved_hash=None, note=note)
     if action == "schedule":
         fields["scheduled_at"] = scheduled_at
     if action == "publish":
@@ -93,7 +110,7 @@ def edit_body(conn, post_id, actor, body):
         raise GateError("cannot edit a published post")
     to_status = "draft" if row["status"] in ("approved", "scheduled", "pending_approval") else row["status"]
     conn.execute(
-        "UPDATE posts SET body=?, status=?, approved_by=NULL, approved_at=NULL, scheduled_at=NULL WHERE id=?",
+        "UPDATE posts SET body=?, status=?, approved_by=NULL, approved_at=NULL, approved_hash=NULL, scheduled_at=NULL WHERE id=?",
         (body, to_status, post_id),
     )
     note = "approval voided" if to_status != row["status"] else ""
