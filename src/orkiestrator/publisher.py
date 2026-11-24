@@ -21,10 +21,27 @@ def due_posts(conn, as_of=None):
 
 
 def run_due(conn, actor="agent:publisher", as_of=None, outbox=None):
+    """Publishes every due, human-approved post exactly once, even if two processes call this at once.
+
+    due_posts() is a plain read and can return the same row to two concurrent callers (two publisher
+    loops, or a loop racing a manual `publish-due`). claim_for_publish() is the only thing that actually
+    decides who gets to publish a given post: it is a single atomic UPDATE, so only one of two racing
+    callers can win it for a given post. The platform call always uses a fresh read taken right after the
+    claim, not the (possibly stale) row from due_posts(), because that is the content the claim just froze
+    (edit_body refuses to touch a 'publishing' post).
+    """
     published = []
-    for post in due_posts(conn, as_of):
-        gate.verify_approval(post)  # before the platform call, not after it
-        ref = get_publisher(post["platform"], outbox).publish(post)
+    for candidate in due_posts(conn, as_of):
+        # Recomputed from the candidate's own fields, not read back from its approved_hash column: a forged
+        # approved_hash (set without actually re-approving the real content) must not satisfy the claim.
+        if not gate.claim_for_publish(conn, candidate["id"], gate.content_hash(candidate)):
+            continue  # another process already claimed it, or its content/approval changed since this read
+        post = conn.execute("SELECT * FROM posts WHERE id=?", (candidate["id"],)).fetchone()
+        try:
+            ref = get_publisher(post["platform"], outbox).publish(post)
+        except Exception as e:
+            gate.release_claim(conn, post["id"], actor, note=str(e))
+            raise
         gate.transition(conn, post["id"], "publish", actor, note=ref)
         published.append((post["id"], ref))
     return published

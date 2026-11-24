@@ -65,6 +65,8 @@ Open the URL it prints (includes a one-time token). Linux/macOS: `./start.sh`. W
 **Research → Tydzień treści → Odpowiedzi** on the Start page, then approve or reject what shows up in
 **Kolejka**. The demo brand ("Ziarnko") and all its data (`knowledge/`, `inputs/`) are fictional.
 
+![The approval queue after one morning loop in demo mode: an Instagram carousel, a Facebook post and a TikTok script, all `pending_approval`, none published](assets/queue.png)
+
 To use a real model instead, set `GEMINI_API_KEY` (free tier at [aistudio.google.com](https://aistudio.google.com/api-keys))
 or `ANTHROPIC_API_KEY` in `local.env` (copy from `local.env.example`).
 
@@ -101,9 +103,13 @@ python3 -m unittest discover -s tests   # 139 tests, ~20s
 ruff check .                            # lint (config in pyproject.toml)
 ```
 
-`tests/test_hitl.py` is the one worth reading first: it tries to approve as a non-human actor, forge a
-`scheduled` status without approval, tamper with content after approval, replay a stale approval hash,
-and bypass the panel's session/origin checks — and asserts every one of those is refused.
+`tests/test_hitl.py` and `tests/test_injection.py` are the ones worth reading first. Between them they
+try to: approve as a non-human actor, forge a `scheduled` status without approval, tamper with content
+after approval, replay a stale approval hash, edit a post while it's mid-publish, run two publishers on
+the same due post at once, bypass the panel's session/origin checks, and push script tags, SQL metacharacters
+and template-injection strings through every text field — and assert every one of those is refused or
+comes out escaped. See [`SECURITY.md`](SECURITY.md) for what the approval gate guarantees and what it
+explicitly doesn't.
 
 ## License
 

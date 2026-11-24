@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from . import lint
 
-STATUSES = ("draft", "pending_approval", "approved", "scheduled", "published", "rejected")
+STATUSES = ("draft", "pending_approval", "approved", "scheduled", "publishing", "published", "rejected")
 
 # action -> (allowed from-statuses, to-status, human required)
 TRANSITIONS = {
@@ -18,7 +18,8 @@ TRANSITIONS = {
     "approve": (("pending_approval",), "approved", True),
     "reject": (("draft", "pending_approval", "approved", "scheduled"), "rejected", True),
     "schedule": (("approved",), "scheduled", False),
-    "publish": (("approved", "scheduled"), "published", False),
+    # "publishing" is reached only through claim_for_publish(), never through transition() directly.
+    "publish": (("approved", "scheduled", "publishing"), "published", False),
 }
 
 
@@ -49,6 +50,46 @@ def verify_approval(row):
         raise GateError(f"post {row['id']} has no human approval on record")
     if row["approved_hash"] != content_hash(row):
         raise GateError(f"post {row['id']} changed after approval (or was approved before content hashing): approve it again")
+
+
+def claim_for_publish(conn, post_id, expected_hash):
+    """Atomically moves an approved/scheduled post to 'publishing', the only way to reach that status.
+
+    `expected_hash` must be computed by the caller from the row it just read (content_hash(row)), not
+    taken from that row's own approved_hash column — the WHERE clause compares it against the column so a
+    forged or stale approved_hash (set without the content actually matching) cannot satisfy the claim.
+
+    A single UPDATE with status, human-approval and exact-hash in its WHERE clause: two processes racing
+    on the same post (two publisher loops, a loop and a manual CLI run) can both read it as due, but only
+    one UPDATE can match and change a row still in 'approved'/'scheduled' — SQLite serializes writers, so
+    the second call's WHERE clause no longer matches once the first commits, and it gets rowcount 0. The
+    same check also catches a post whose content or approval changed since the caller read it (edit_body
+    refuses to touch a 'publishing' row, so once claimed, nothing can change under it).
+
+    Returns True iff this call won the claim. The caller must then either finish with transition(...,
+    "publish", ...) or, on failure, call release_claim() so the post can be retried.
+    """
+    cur = conn.execute(
+        "UPDATE posts SET status='publishing' WHERE id=? AND status IN ('approved','scheduled') "
+        "AND approved_by LIKE 'human:%' AND approved_hash=?",
+        (post_id, expected_hash),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def release_claim(conn, post_id, actor, note=""):
+    """Reverts a claimed-but-failed publish attempt back to 'scheduled' so the retry loop picks it up again.
+
+    If the process dies between claim_for_publish() and this call (e.g. mid platform HTTP call, not a
+    caught Python exception), the post is left in 'publishing' on purpose: an automatic retry could
+    publish it a second time if the first call actually went through before the crash. A post stuck in
+    'publishing' needs the owner to check whether it was really published and resolve it by hand
+    (`python -m orkiestrator list --status publishing`) — this is a deliberate trade-off, not a bug.
+    """
+    conn.execute("UPDATE posts SET status='scheduled' WHERE id=? AND status='publishing'", (post_id,))
+    _log(conn, post_id, actor, "publish_failed", "publishing", "scheduled", note)
+    conn.commit()
 
 
 def add_draft(conn, actor, platform, kind, body, title="", hook="", brief_ref="", link_id="", payload="", warnings="", is_test=False):
@@ -108,6 +149,8 @@ def edit_body(conn, post_id, actor, body):
         raise GateError(f"post {post_id} not found")
     if row["status"] == "published":
         raise GateError("cannot edit a published post")
+    if row["status"] == "publishing":
+        raise GateError(f"cannot edit post {post_id} while it is being published (status 'publishing')")
     to_status = "draft" if row["status"] in ("approved", "scheduled", "pending_approval") else row["status"]
     conn.execute(
         "UPDATE posts SET body=?, status=?, approved_by=NULL, approved_at=NULL, approved_hash=NULL, scheduled_at=NULL WHERE id=?",

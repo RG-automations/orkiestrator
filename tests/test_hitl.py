@@ -62,11 +62,13 @@ class GateTests(unittest.TestCase):
         self.assertFalse(list(self.outbox.iterdir()))
 
     def test_forged_human_approval_columns_without_matching_hash_are_refused(self):
+        """approved_by/approved_at set by raw SQL, with no matching approved_hash: the atomic claim never
+        fires (its WHERE clause requires approved_hash = hash-of-this-content), so the post is silently
+        left alone rather than reaching the platform. No exception: it just never gets due_posts' claim."""
         pid = pending(self.conn)
         self.conn.execute("UPDATE posts SET status='scheduled', approved_by='human:owner', approved_at='2026-01-01', "
                           "scheduled_at='2000-01-01T00:00:00+00:00' WHERE id=?", (pid,))
-        with self.assertRaises(gate.GateError):
-            self.publish_due()
+        self.assertEqual(self.publish_due(), [])
         self.assertEqual(self.status(pid), "scheduled")
         self.assertFalse(list(self.outbox.iterdir()))
 
@@ -96,8 +98,8 @@ class GateTests(unittest.TestCase):
     def test_approval_from_before_content_hashing_must_be_given_again(self):
         pid = approved_and_due(self.conn)
         self.conn.execute("UPDATE posts SET approved_hash=NULL WHERE id=?", (pid,))
-        with self.assertRaises(gate.GateError):
-            self.publish_due()
+        self.assertEqual(self.publish_due(), [])
+        self.assertEqual(self.status(pid), "scheduled")
 
     def test_published_post_cannot_be_published_again_or_edited(self):
         pid = approved_and_due(self.conn)
@@ -107,6 +109,64 @@ class GateTests(unittest.TestCase):
             gate.transition(self.conn, pid, "publish", "agent:publisher")
         with self.assertRaises(gate.GateError):
             gate.edit_body(self.conn, pid, OWNER, "po publikacji")
+
+    def test_claimed_post_cannot_be_edited_mid_publish(self):
+        """Once claim_for_publish() has moved a post to 'publishing', edit_body must refuse it: this is
+        what makes it safe for the publisher to read the row again after the claim and trust its content."""
+        pid = approved_and_due(self.conn)
+        row = self.conn.execute("SELECT * FROM posts WHERE id=?", (pid,)).fetchone()
+        self.assertTrue(gate.claim_for_publish(self.conn, pid, gate.content_hash(row)))
+        with self.assertRaises(gate.GateError):
+            gate.edit_body(self.conn, pid, OWNER, "podmieniona tresc w trakcie publikacji")
+        self.assertEqual(self.conn.execute("SELECT body FROM posts WHERE id=?", (pid,)).fetchone()["body"], row["body"])
+
+    def test_a_crashed_claim_is_never_auto_retried(self):
+        """If the process dies between claim_for_publish() and release_claim()/transition() (simulated here
+        by just never calling either), the post is stuck in 'publishing' on purpose rather than being
+        silently republished by the next run_due() call — see release_claim()'s docstring."""
+        pid = approved_and_due(self.conn)
+        row = self.conn.execute("SELECT * FROM posts WHERE id=?", (pid,)).fetchone()
+        self.assertTrue(gate.claim_for_publish(self.conn, pid, gate.content_hash(row)))
+        self.assertEqual(self.status(pid), "publishing")
+        self.assertEqual(self.publish_due(), [])  # due_posts() only selects approved/scheduled, not publishing
+        self.assertEqual(self.status(pid), "publishing")  # still stuck; needs the owner, not auto-retried
+
+    def test_two_concurrent_publish_runs_publish_the_same_post_exactly_once(self):
+        """Two processes/threads can both see the same due post as unclaimed at the same instant; only one
+        of them may actually call the platform adapter for it. Real file-backed DB (not :memory:, which is
+        private per connection); each worker opens its own connection, as two real processes would."""
+        db_path = self.outbox.parent / "concurrent.db"
+        setup_conn = connect(db_path)
+        pid = approved_and_due(setup_conn)
+        setup_conn.close()
+
+        results, errors = {}, {}
+
+        def worker(name):
+            conn = connect(db_path)
+            try:
+                results[name] = publisher.run_due(conn, actor=f"agent:{name}", outbox=self.outbox)
+            except Exception as e:  # noqa: BLE001  captured and asserted on below, not swallowed
+                errors[name] = e
+            finally:
+                conn.close()
+
+        ta = threading.Thread(target=worker, args=("a",))
+        tb = threading.Thread(target=worker, args=("b",))
+        ta.start()
+        tb.start()
+        ta.join()
+        tb.join()
+
+        self.assertEqual(errors, {})
+        wins = [name for name, res in results.items() if res]
+        self.assertEqual(len(wins), 1, results)
+        check_conn = connect(db_path)
+        row = check_conn.execute("SELECT status FROM posts WHERE id=?", (pid,)).fetchone()
+        self.assertEqual(row["status"], "published")
+        check_conn.close()
+        files = list(self.outbox.glob(f"linkedin-{pid}.json"))
+        self.assertEqual(len(files), 1)  # published exactly once, not twice
 
     def test_failed_platform_call_leaves_post_unpublished(self):
         pid = approved_and_due(self.conn)
